@@ -1,38 +1,55 @@
-import * as core from '@actions/core';
-import * as github from '@actions/github';
-import * as yaml from 'js-yaml';
-import {Minimatch} from 'minimatch';
+import * as core from "@actions/core";
+import * as github from "@actions/github";
+import * as yaml from "js-yaml";
+import { Minimatch } from "minimatch";
+import _ from 'lodash';
 
 async function run() {
   try {
-    const token = core.getInput('repo-token', {required: true});
-    const configPath = core.getInput('configuration-path', {required: true});
+    const token = core.getInput('access-token', {required: true});
+    const org = core.getInput('org', { required: true });
+    const reviewTeamSlug = core.getInput('review-team-slug', { required: true });
 
-    const prNumber = getPrNumber();
-    if (!prNumber) {
-      console.log('Could not get pull request number from context, exiting');
+    if (!token || !org || !reviewTeamSlug) {
+      core.debug('Please provide access-token, org and review-team-slug');
       return;
     }
 
-    const client = new github.GitHub(token);
-
-    core.debug(`fetching changed files for pr #${prNumber}`);
-    const changedFiles: string[] = await getChangedFiles(client, prNumber);
-    const labelGlobs: Map<string, string[]> = await getLabelGlobs(
-      client,
-      configPath
-    );
-
-    const labels: string[] = [];
-    for (const [label, globs] of labelGlobs.entries()) {
-      core.debug(`processing ${label}`);
-      if (checkGlobs(changedFiles, globs)) {
-        labels.push(label);
-      }
+    const prNumber = getPrNumber();
+    if (!prNumber) {
+      core.debug('Could not get pull request number from context');
+      return;
     }
 
-    if (labels.length > 0) {
-      await addLabels(client, prNumber, labels);
+    const teamName = `${_.capitalize(reviewTeamSlug)}-Team`;
+    const client = new github.GitHub(token);
+
+    core.setOutput('PROCESSING', `Fetching changed files for pr #${prNumber}`);
+    const changedFiles: string[] = await getChangedFiles(client, prNumber);
+    const hasChanges: boolean = hasStyleChanges(changedFiles);
+
+    if (hasChanges) {
+      core.setOutput('STATUS:', `Checking ${teamName} approval status`);
+      const approvedReviewers: string[] = await getApprovedReviews(client, prNumber);
+      let approvalNeeded: boolean = true;
+      if (approvedReviewers.length) {
+        console.log (`Pull request is approved by ${approvedReviewers.join(', ')}`);
+        const reviewTeamMembers: string[] = await getReviewers(client, org, reviewTeamSlug);
+        if (_.isEmpty(reviewTeamMembers)) {
+          core.setFailed(`${teamName} has no members`);
+          return;
+        } else if (_.intersection(approvedReviewers, reviewTeamMembers).length > 0) {
+          approvalNeeded = false;
+        }
+      }
+
+      if (approvalNeeded) {
+        core.setFailed(`${teamName} approval needed`);
+      } else {
+        core.setOutput(`${teamName} approved changes.`, '0');
+      }
+    } else {
+      core.setOutput(`No approval needed from ${teamName}`, '0');
     }
   } catch (error) {
     core.error(error);
@@ -40,12 +57,43 @@ async function run() {
   }
 }
 
+async function getReviewers(client: github.GitHub, org: string, reviewTeamSlug: string): Promise<string[]> {
+  const team = await client.teams.getByName({
+    org,
+    team_slug: reviewTeamSlug,
+  });
+  if (!team) {
+    return [];
+  }
+  const teamId = team.data.id;
+  const members = await client.teams.listMembers({
+    team_id: teamId,
+  });
+  return _.map(members.data, 'login');
+}
+
+async function getApprovedReviews(client: github.GitHub, prNumber: number): Promise<string[]> {
+  const listReviewRequests = await client.pulls.listReviews({
+    owner: github.context.repo.owner,
+    repo: github.context.repo.repo,
+    pull_number: prNumber,
+  });
+  return _(listReviewRequests.data)
+    .filter({ state: 'APPROVED' })
+    .map('user.login')
+    .uniq()
+    .value();
+}
+
 function getPrNumber(): number | undefined {
-  const pullRequest = github.context.payload.pull_request;
+  const payload = github.context.payload;
+  let pullRequest = payload.pull_request;
+  if (!pullRequest && payload.action === 'rerequested') {
+    pullRequest = payload.check_suite.pull_requests[0];
+  }
   if (!pullRequest) {
     return undefined;
   }
-
   return pullRequest.number;
 }
 
@@ -58,90 +106,19 @@ async function getChangedFiles(
     repo: github.context.repo.repo,
     pull_number: prNumber
   });
-
   const changedFiles = listFilesResponse.data.map(f => f.filename);
-
-  core.debug('found changed files:');
-  for (const file of changedFiles) {
-    core.debug('  ' + file);
-  }
-
   return changedFiles;
 }
 
-async function getLabelGlobs(
-  client: github.GitHub,
-  configurationPath: string
-): Promise<Map<string, string[]>> {
-  const configurationContent: string = await fetchContent(
-    client,
-    configurationPath
-  );
-
-  // loads (hopefully) a `{[label:string]: string | string[]}`, but is `any`:
-  const configObject: any = yaml.safeLoad(configurationContent);
-
-  // transform `any` => `Map<string,string[]>` or throw if yaml is malformed:
-  return getLabelGlobMapFromObject(configObject);
-}
-
-async function fetchContent(
-  client: github.GitHub,
-  repoPath: string
-): Promise<string> {
-  const response = await client.repos.getContents({
-    owner: github.context.repo.owner,
-    repo: github.context.repo.repo,
-    path: repoPath,
-    ref: github.context.sha
-  });
-
-  return Buffer.from(response.data.content, 'base64').toString();
-}
-
-function getLabelGlobMapFromObject(configObject: any): Map<string, string[]> {
-  const labelGlobs: Map<string, string[]> = new Map();
-  for (const label in configObject) {
-    if (typeof configObject[label] === 'string') {
-      labelGlobs.set(label, [configObject[label]]);
-    } else if (configObject[label] instanceof Array) {
-      labelGlobs.set(label, configObject[label]);
-    } else {
-      throw Error(
-        `found unexpected type for label ${label} (should be string or array of globs)`
-      );
-    }
+function hasStyleChanges(changedFiles: string[]): boolean {
+  if (_.isEmpty(changedFiles)) {
+    return false
   }
-
-  return labelGlobs;
-}
-
-function checkGlobs(changedFiles: string[], globs: string[]): boolean {
-  for (const glob of globs) {
-    core.debug(` checking pattern ${glob}`);
-    const matcher = new Minimatch(glob);
-    for (const changedFile of changedFiles) {
-      core.debug(` - ${changedFile}`);
-      if (matcher.match(changedFile)) {
-        core.debug(` ${changedFile} matches`);
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-async function addLabels(
-  client: github.GitHub,
-  prNumber: number,
-  labels: string[]
-) {
-  await client.issues.addLabels({
-    owner: github.context.repo.owner,
-    repo: github.context.repo.repo,
-    issue_number: prNumber,
-    labels: labels
-  });
+  return _.some(changedFiles, fileName => (
+    _.endsWith(fileName, '.scss')
+    || _.endsWith(fileName, '.css')
+    || _.includes(fileName, 'app/modules/Common')
+  ));
 }
 
 run();

@@ -2,11 +2,10 @@ name: 'Pull Request Labeler'
 description: 'Label pull requests by files altered'
 author: 'GitHub'
 inputs: 
+  access-token:
+    description: 'Access token'
   repo-token:
     description: 'The GITHUB_TOKEN secret'
-  configuration-path:
-    description: 'The path for the label configurations'
-    default: '.github/labeler.yml'
 runs:
   using: 'node12'
   main: 'lib/main.js'

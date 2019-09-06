@@ -1,32 +1,22 @@
-# Pull Request Labeler
+# Frontend Actions
 
-Pull request labeler triages PRs based on the paths that are modified in the PR.
+- Checks if PR needs Frontend team review
 
-To use, create a `.github/labeler.yml` file with a list of labels and [minimatch](https://github.com/isaacs/minimatch) 
-globs to match to apply the label. 
 
-Example:
+### How to use
 ```
-label1:
-- example1/**/*
-
-label2: example2/*
-
-label3:
-- example3/*
-- example3/**/*.yml
-```
-Then create a workflow:
-```
-name: "Pull Request Labeler"
-on: 
-- pull_request
+name: "Frontend Review"
+on: [pull_request_review, pull_request]
 
 jobs:
-  triage:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/labeler@v2
-      with:
-        repo-token: "${{ secrets.GITHUB_TOKEN }}"
+triage:
+  name: Frontend Team Approval
+  runs-on: ubuntu-latest
+  steps:
+  - uses: Rippling/git-actions-frontend@master
+    with:
+      org: "Rippling"
+      review-team-slug: "frontend"
+      repo-token: "${{ secrets.GITHUB_TOKEN }}"
+      access-token: "${{ secrets.ACCESS_TOKEN_BK }}"
 ```
