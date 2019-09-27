@@ -8,6 +8,7 @@ async function run() {
   try {
     const token = core.getInput('access-token', {required: true});
     const org = core.getInput('org', { required: true });
+    const additionalReviewers = core.getInput('additional-reviewers');
     const reviewTeamSlug = core.getInput('review-team-slug', { required: true });
 
     if (!token || !org || !reviewTeamSlug) {
@@ -38,7 +39,7 @@ async function run() {
         if (_.isEmpty(reviewTeamMembers)) {
           core.setFailed(`${teamName} has no members`);
           return;
-        } else if (_.intersection(approvedReviewers, reviewTeamMembers).length > 0) {
+        } else if (_.intersection(approvedReviewers, [...reviewTeamMembers, ..._.split(additionalReviewers, '')]).length > 0) {
           approvalNeeded = false;
         }
       }
