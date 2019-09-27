@@ -1,5 +1,5 @@
-name: 'Pull Request Labeler'
-description: 'Label pull requests by files altered'
+name: 'Frontend Review'
+description: 'Checks Frontend Reviews on a PR'
 author: 'GitHub'
 inputs: 
   access-token:
