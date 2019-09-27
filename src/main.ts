@@ -115,11 +115,12 @@ function hasStyleChanges(changedFiles: string[]): boolean {
   if (_.isEmpty(changedFiles)) {
     return false
   }
-  return _.some(changedFiles, fileName => (
-    _.endsWith(fileName, '.scss')
-    || _.endsWith(fileName, '.css')
-    || _.includes(fileName, 'app/modules/Common')
-  ));
+  return _.some(changedFiles, fileName => _.includes(fileName, 'app/modules/Common'));
+  // return _.some(changedFiles, fileName => (
+  //   _.endsWith(fileName, '.scss')
+  //   || _.endsWith(fileName, '.css')
+  //   || _.includes(fileName, 'app/modules/Common')
+  // ));
 }
 
 run();
