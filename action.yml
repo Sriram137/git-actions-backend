@@ -1,4 +1,4 @@
-name: 'Frontend Review'
+name: 'FrontendReview'
 description: 'Checks Frontend Reviews on a PR'
 author: 'GitHub'
 inputs: 

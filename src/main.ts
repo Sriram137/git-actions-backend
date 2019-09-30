@@ -8,6 +8,7 @@ async function run() {
   try {
     const token = core.getInput('access-token', {required: true});
     const org = core.getInput('org', { required: true });
+    const coreReviewers = core.getInput('core-reviewers');
     const additionalReviewers = core.getInput('additional-reviewers');
     const reviewTeamSlug = core.getInput('review-team-slug', { required: true });
 
@@ -24,17 +25,21 @@ async function run() {
 
     const teamName = `${_.capitalize(reviewTeamSlug)}-Team`;
     const client = new github.GitHub(token);
+    if (github.context.eventName === 'pull_request_review') {
+      await reRunFrontendCheck(client);
+      return;
+    }
 
-    core.setOutput('PROCESSING', `Fetching changed files for pr #${prNumber}`);
+    console.log(`PROCESSING: Fetching changed files for pr #${prNumber}`);
     const changedFiles: string[] = await getChangedFiles(client, prNumber);
     const hasChanges: boolean = hasStyleChanges(changedFiles);
 
     if (hasChanges) {
-      core.setOutput('STATUS:', `Checking ${teamName} approval status`);
+      console.log(`STATUS: Checking ${teamName} approval status`);
       const approvedReviewers: string[] = await getApprovedReviews(client, prNumber);
       let approvalNeeded: boolean = true;
       if (approvedReviewers.length) {
-        console.log (`Pull request is approved by ${approvedReviewers.join(', ')}`);
+        console.log(`Pull request is approved by ${approvedReviewers.join(', ')}`);
         const reviewTeamMembers: string[] = await getReviewers(client, org, reviewTeamSlug);
         if (_.isEmpty(reviewTeamMembers)) {
           core.setFailed(`${teamName} has no members`);
@@ -45,15 +50,15 @@ async function run() {
       }
 
       if (approvalNeeded) {
+        await addReviewers(client, prNumber, coreReviewers);
         core.setFailed(`${teamName} approval needed`);
       } else {
-        core.setOutput(`${teamName} approved changes.`, '0');
+        console.log(`${teamName} approved changes.`);
       }
     } else {
-      core.setOutput(`No approval needed from ${teamName}`, '0');
+      console.log(`No approval needed from ${teamName}`);
     }
   } catch (error) {
-    core.error(error);
     core.setFailed(error.message);
   }
 }
@@ -121,6 +126,44 @@ function hasStyleChanges(changedFiles: string[]): boolean {
   //   || _.endsWith(fileName, '.css')
   //   || _.includes(fileName, 'app/modules/Common')
   // ));
+}
+
+async function reRunFrontendCheck(client: github.GitHub) {
+  console.log('Finding Frontend Review Check');
+  const checkListResponse = await client.checks.listForRef({
+    owner: github.context.repo.owner,
+    repo: github.context.repo.repo,
+    ref: github.context.sha,
+    check_name: 'FrontendReviewCheck',
+  });
+
+  if (!_.isEmpty(checkListResponse.data.check_runs)) {
+    console.log('Re-triggering Frontend Review Check');
+    checkListResponse.data.check_runs[0]
+    await client.checks.rerequestSuite({
+      owner: github.context.repo.owner,
+      repo: github.context.repo.repo,
+      check_suite_id: checkListResponse.data.check_runs[0].check_suite.id
+    })
+  }
+}
+
+async function addReviewers(client: github.GitHub, prNumber: number, coreReviewers: string) {
+  const pullRequestResponse = await client.pulls.get({
+    owner: github.context.repo.owner,
+    repo: github.context.repo.repo,
+    pull_number: prNumber
+  });
+
+  console.log(`PR author: ${pullRequestResponse.data.user.login}`);
+  const reviewers = _.filter(_.split(coreReviewers, ','), reviewer => reviewer !== pullRequestResponse.data.user.login);
+  console.log(`Requestung review from: ${_.join(reviewers, ', ')}`);
+  client.pulls.createReviewRequest({
+    owner: github.context.repo.owner,
+    repo: github.context.repo.repo,
+    pull_number: prNumber,
+    reviewers: reviewers,
+  })
 }
 
 run();
