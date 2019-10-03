@@ -145,6 +145,9 @@ async function reRunFrontendCheck(client: github.GitHub) {
       repo: github.context.repo.repo,
       check_suite_id: checkListResponse.data.check_runs[0].check_suite.id
     })
+  } else {
+    console.log('No Check Found');
+    console.log(checkListResponse.data);
   }
 }
 
