@@ -174,7 +174,7 @@ async function checkApprovalForSHA(client: github.GitHub, pull_number: number, c
   console.log('STATUS: Checking approval status');
   const approvedLogins = await getApprovedReviewsForSHA(client, pull_number, commit_sha);
   const reviewTeamMembers: string[] = await getReviewers(client, reviewTeamSlug);
-  if (_.intersection(approvedLogins, [...reviewTeamMembers, ..._.split(additionalReviewers, '')]).length > 0) {
+  if (_.intersection(approvedLogins, [...reviewTeamMembers, ..._.split(additionalReviewers, ',')]).length > 0) {
     return true;
   }
   return false;
