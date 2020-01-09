@@ -21,20 +21,101 @@ async function run() {
     const client = new github.GitHub(token);
 
     console.log(`EVENT: ${github.context.eventName}`);
+    const codeOwnerMap = await getCodeOwnersFile(client);
+    const coreCOReviewers = await getCodeOwnersReview(client, codeOwnerMap);
+
     if (github.context.eventName === 'push') {
-      await handlePushEvent(client, teamName, coreReviewers, additionalReviewers, reviewTeamSlug);
-      return;
+       await handlePushEvent(client, teamName, coreReviewers, coreCOReviewers, additionalReviewers, reviewTeamSlug);
+       return;
     }
 
     if (github.context.eventName === 'pull_request_review') {
-      await reTriggerFrontendCheck(client);
-      return;
+       await reTriggerFrontendCheck(client);
+       return;
     }
-
-    console.log('ERROR: Event not handled');
   } catch (error) {
     core.setFailed(error.message);
   }
+}
+
+async function getCodeOwnersReview(client: github.GitHub, codeOwnerMap: any): Promise<string>{
+  const pullRequest = await getPullRequestForSHA(client, github.context.sha);
+  if(pullRequest){
+    let pullRequestAuthor = pullRequest.user.login;
+    let codeReviewers = "";
+    const changedFiles: string[] = await getChangedFiles(client, pullRequest.number);
+    changedFiles.forEach(fname => {
+      for (var key in codeOwnerMap){
+        var codePath = key;
+        if(codePath.charAt(codePath.length -1 ) == '*'){
+          codePath = codePath.substring(0, codePath.length-2);
+        }
+        if (fname.includes(codePath)){
+          var ignore = false;
+          codeOwnerMap[key].forEach(codeOwner => {
+            if (codeOwner.includes(pullRequestAuthor)){
+              ignore = true;
+              return;
+            }
+          })
+          if(ignore == false){
+            codeOwnerMap[key].forEach(codeOwner => {
+              if(codeOwner.charAt(0)=='@'){
+                codeOwner = codeOwner.substring(1);
+              }
+              if(!(codeReviewers.includes(codeOwner))){
+                codeReviewers += codeOwner + ",";
+              }
+            })
+          }
+        }
+      }
+    })
+    if(codeReviewers.charAt(codeReviewers.length - 1) == ','){
+      codeReviewers = codeReviewers.substring(0, codeReviewers.length - 1);
+    }
+    return codeReviewers
+  }else {
+    core.setFailed('ERROR: Pull request not found.');
+    return "";
+  }
+}
+
+async function getCodeOwnersFile(client: github.GitHub): Promise<any>{
+  const coFileResponse = await client.repos.getContents({
+    owner: github.context.repo.owner,
+    repo: github.context.repo.repo,
+    path: "CODEOWNERS",
+    ref: "master"
+  });
+  let coFileContent = coFileResponse.data.content;
+  let buff = new Buffer(coFileContent, 'base64');
+  let coFileContentDecoded = buff.toString('ascii');
+  let codeOwnerMap = {};
+  let data = coFileContentDecoded.split("\n");
+  data.forEach(element => {
+    if(element.includes('#')){
+      return;
+    }
+    else if(element.includes('@')){
+      let element_split = element.split(" ");
+      let codeOwnersList : string[] = [];
+      let codePath = "";
+      element_split.forEach(item => {
+        item = item.trim();
+        if(item != ''){
+          if(item.includes('@')){
+            codeOwnersList.push(item);
+          }
+          else{
+            codePath = item;
+          }
+        }
+      })
+      codeOwnerMap[codePath] = codeOwnersList;
+    }
+  })
+  return codeOwnerMap;
 }
 
 async function getReviewers(client: github.GitHub, reviewTeamSlug: string): Promise<string[]> {
@@ -100,6 +181,8 @@ async function reTriggerFrontendCheck(client: github.GitHub) {
   console.log('LOG: Finding Frontend Review Check');
   const pullRequest = github.context.payload.pull_request;
   if (pullRequest) {
+    const changedFiles: string[] = await getChangedFiles(client, pullRequest.number);
+
     const headSHA = await getPullRequestHeadSHA(client, pullRequest.number);
     console.log(`LOG: Finding checks for PR: ${headSHA}`)
     const checkListResponse = await client.checks.listForRef({
@@ -133,8 +216,9 @@ async function getPullRequestHeadSHA(client: github.GitHub, pull_number: number)
   return pullRequestResponse.data.head.sha;
 }
 // PUSH EVENT HANDLING
-async function handlePushEvent(client: github.GitHub, teamName: string, coreReviewers: string, additionalReviewers: string, reviewTeamSlug: string) {
+async function handlePushEvent(client: github.GitHub, teamName: string, coreReviewers: string, coreCOReviewers: string, additionalReviewers: string, reviewTeamSlug: string) {
   const pullRequest = await getPullRequestForSHA(client, github.context.sha);
+  const PROwner = pullRequest.user.login;
   if (!pullRequest) {
     console.log('ERROR: Pull request not found.');
     return;
@@ -144,7 +228,7 @@ async function handlePushEvent(client: github.GitHub, teamName: string, coreRevi
   const hasChanges: boolean = hasReviewableChanges(changedFiles);
   if (hasChanges) {
     const isApproved = await checkApprovalForSHA(client, pullRequest.number, github.context.sha, additionalReviewers, reviewTeamSlug);
-    if (isApproved) {
+    if (isApproved || coreCOReviewers.includes(PROwner)) {
       console.log(`SUCCESS: ${teamName} approved changes.`);
     } else {
       await addReviewers(client, pullRequest.number, coreReviewers);
@@ -170,7 +254,7 @@ async function listPullRequestsAssociatedWithCommit(client: github.GitHub, commi
   });
   return apiResponse.data;
 }
-async function checkApprovalForSHA(client: github.GitHub, pull_number: number, commit_sha: string, additionalReviewers: string, reviewTeamSlug: string): Promise<boolean> {
+async function checkApprovalForSHA(client: github.GitHub, pull_number: number, commit_sha: string, additionalReviewers:string, reviewTeamSlug: string): Promise<boolean> {
   console.log('STATUS: Checking approval status');
   const approvedLogins = await getApprovedReviewsForSHA(client, pull_number, commit_sha);
   const reviewTeamMembers: string[] = await getReviewers(client, reviewTeamSlug);
