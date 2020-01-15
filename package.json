@@ -22,24 +22,24 @@
   "author": "Balram",
   "license": "MIT",
   "dependencies": {
-    "@actions/core": "^1.0.0",
-    "@actions/github": "^1.0.0",
+    "@actions/core": "^1.2.1",
+    "@actions/github": "^1.1.0",
     "js-yaml": "^3.13.1",
     "lodash": "^4.17.15",
     "minimatch": "^3.0.4",
     "semver": "^6.1.1"
   },
   "devDependencies": {
-    "@types/jest": "^24.0.13",
-    "@types/node": "^12.0.4",
-    "@types/semver": "^6.0.0",
-    "@types/minimatch": "^3.0.0",
+    "@types/jest": "^24.0.25",
     "@types/js-yaml": "^3.12.1",
+    "@types/minimatch": "^3.0.0",
+    "@types/node": "^12.12.24",
+    "@types/semver": "^6.2.0",
     "husky": "^2.3.0",
-    "jest": "^24.8.0",
-    "jest-circus": "^24.7.1",
-    "prettier": "^1.17.1",
-    "ts-jest": "^24.0.2",
-    "typescript": "^3.5.1"
+    "jest": "^24.9.0",
+    "jest-circus": "^24.9.0",
+    "prettier": "^1.19.1",
+    "ts-jest": "^24.3.0",
+    "typescript": "^3.7.4"
   }
 }
